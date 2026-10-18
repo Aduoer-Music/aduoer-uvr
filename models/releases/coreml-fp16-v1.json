@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "release": "coreml-fp16-v1",
+  "baseURL": "https://github.com/Aduoer-Music/aduoer-uvr/releases/download/coreml-fp16-v1",
+  "models": [
+    {
+      "id": "mdx9482",
+      "version": "coreml-fp16-v1",
+      "packageName": "UVR9482FP16.mlpackage",
+      "files": [
+        {
+          "path": "Manifest.json",
+          "asset": "UVR9482FP16-manifest.json",
+          "bytes": 617,
+          "sha256": "532d5c7de5ab0270672b8b181ad1ea7a18bf1dfe2ac4321653ad891dc86d65e5"
+        },
+        {
+          "path": "Data/com.apple.CoreML/model.mlmodel",
+          "asset": "UVR9482FP16-model.mlmodel",
+          "bytes": 116252,
+          "sha256": "54b11318db2d7744daf4de599f2e1642b04872265baa69e10a4c584216f4e33c"
+        },
+        {
+          "path": "Data/com.apple.CoreML/weights/weight.bin",
+          "asset": "UVR9482FP16-weights.bin",
+          "bytes": 14850048,
+          "sha256": "c58b40c6767e15c2e31be86eca74ddb72765cc169ca698559812daed0f273a1b"
+        }
+      ]
+    },
+    {
+      "id": "instHQ3",
+      "version": "coreml-fp16-v1",
+      "packageName": "UVRInstHQ3FP16.mlpackage",
+      "files": [
+        {
+          "path": "Manifest.json",
+          "asset": "UVRInstHQ3FP16-manifest.json",
+          "bytes": 617,
+          "sha256": "68363cc73964fb080bbcf6893866b13a926dae94b9bfe5ad68f3030cec1aceee"
+        },
+        {
+          "path": "Data/com.apple.CoreML/model.mlmodel",
+          "asset": "UVRInstHQ3FP16-model.mlmodel",
+          "bytes": 116460,
+          "sha256": "83a5d0f8b6f88c7e3edc7dabfab5b7c762b09e6c0a221007ca437d32a741f906"
+        },
+        {
+          "path": "Data/com.apple.CoreML/weights/weight.bin",
+          "asset": "UVRInstHQ3FP16-weights.bin",
+          "bytes": 33377792,
+          "sha256": "0a687c627a66e8dc3dc6947e31d35526164f234757208624506ff2aaf47bd1a5"
+        }
+      ]
+    }
+  ]
+}

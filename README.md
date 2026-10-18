@@ -54,6 +54,8 @@ let result = try await SourceSeparator().separate(
 
 使用 9482 时，将模型名换为 `UVR9482FP16`，配置换为 `.mdx9482`。每次任务使用独立工作目录，失败或取消后由调用方清理该目录。
 
+压缩音频先使用固定小缓冲顺序解码为临时 PCM CAF，再按实际帧数分块推理，避免文件头长度估算偏差导致尾块失败。临时文件占用磁盘空间随歌曲时长增长，解码和推理缓冲区的大小固定。
+
 ## 准备模型
 
 在安装 Xcode 的 Apple Silicon Mac 上，使用 Python 3.9：
@@ -68,6 +70,26 @@ python3.9 -m venv .native-venv
 ```
 
 模型生成在 `models/coreml/`。下载来源和校验和见 `dependencies.lock.json`；权重许可见 [模型说明](models/README.md)。
+
+### 下载已转换的模型
+
+固定版本：[Core ML FP16 v1](https://github.com/Aduoer-Music/aduoer-uvr/releases/tag/coreml-fp16-v1)。9482 约 15 MB，Inst_HQ_3 约 33.5 MB。Release 中的 `models.json` 记录每个文件的路径、大小与 SHA-256；相同清单保存在 [models/releases/coreml-fp16-v1.json](models/releases/coreml-fp16-v1.json)。权重不受本项目 Apache 2.0 代码许可覆盖，详见 [模型说明](models/MODEL_NOTICES.md)。
+
+`RemoteModelStore` 逐文件下载并校验，重建 `.mlpackage`，在当前设备编译后原子保存。模型文件流式写盘，编译成功后删除下载源包；完成后无需联网即可复用。请在用户明确点击下载后调用 `prepare`，选择模型和进入演唱模式只检查 `cachedModelURL`。
+
+```swift
+let catalog = try JSONDecoder().decode(ModelReleaseCatalog.self, from: pinnedCatalogData)
+let descriptor = catalog.models.first { $0.id == "mdx9482" }!
+let store = RemoteModelStore(directory: URL.applicationSupportDirectory.appendingPathComponent("UVRModels"))
+// Only from an explicit download action:
+let modelURL = try await store.prepare(descriptor, baseURL: catalog.baseURL) { progress in
+    // .downloading(fraction), .compiling, .ready
+}
+// Later, offline; returns nil if the selected model has not been downloaded:
+let installedURL = try await store.cachedModelURL(for: descriptor)
+```
+
+客户端应内置经过审核的固定清单，不能直接信任网络清单来替换校验值。发布者可用 `tools/prepare_model_release.py` 生成资产，更新模型时使用新的版本标签，不替换旧版文件。
 
 ## 测试
 

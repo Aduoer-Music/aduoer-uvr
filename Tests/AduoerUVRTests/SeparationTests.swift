@@ -5,6 +5,29 @@ import XCTest
 @testable import AduoerUVR
 
 final class SeparationTests: XCTestCase {
+    /// A playable MP3 can advertise more frames than the decoder returns at EOF.
+    /// Normalize to the actual decoded length before random-access overlapping inference.
+    func testCompressedTailUsesDecodedFrameCount() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let input = Bundle.module.url(forResource: "short-tail", withExtension: "mp3", subdirectory: "Fixtures")!
+        let decoder = try AVAudioFile(forReading: input, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let buffer = AVAudioPCMBuffer(pcmFormat: decoder.processingFormat, frameCapacity: 8192)!
+        var decodedFrames: AVAudioFramePosition = 0
+        repeat {
+            try decoder.read(into: buffer, frameCount: buffer.frameCapacity)
+            decodedFrames += AVAudioFramePosition(buffer.frameLength)
+        } while buffer.frameLength == buffer.frameCapacity
+        XCTAssertLessThan(decodedFrames, decoder.length, "Fixture must reproduce the inaccurate compressed length")
+        let normalized = try AudioNormalization.open(input, directory: directory)
+        XCTAssertEqual(normalized.length, decodedFrames)
+        XCTAssertEqual(normalized.fileFormat.streamDescription.pointee.mFormatID, kAudioFormatLinearPCM)
+        normalized.framePosition = max(0, normalized.length - 137_724)
+        let tail = AVAudioPCMBuffer(pcmFormat: normalized.processingFormat, frameCapacity: 137_724)!
+        try normalized.read(into: tail, frameCount: tail.frameCapacity)
+        XCTAssertEqual(tail.frameLength, tail.frameCapacity)
+    }
+
     func testResampling48kMonoProduces44kStereo() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -55,6 +78,30 @@ final class SeparationTests: XCTestCase {
 
     func testMDX9482StreamingRealModel() async throws { try await streaming(configuration: .mdx9482, name: "UVR9482FP16") }
     func testInstHQ3StreamingRealModel() async throws { try await streaming(configuration: .instHQ3, name: "UVRInstHQ3FP16") }
+
+    func testCompressedTailStreamingRealModel() async throws {
+        guard let location = ProcessInfo.processInfo.environment["UVR_TEST_MODEL_DIR"] else {
+            throw XCTSkip("Set UVR_TEST_MODEL_DIR for integration tests")
+        }
+        let model = try await MLModel.compileModel(at: URL(fileURLWithPath: location).appendingPathComponent("UVRInstHQ3FP16.mlpackage"))
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let input = Bundle.module.url(forResource: "short-tail", withExtension: "mp3", subdirectory: "Fixtures")!
+        let original = try read(input)
+        let result = try await SourceSeparator().separate(input: input, directory: directory, modelURL: model, configuration: .instHQ3)
+        let vocals = try read(result.vocals), instrumental = try read(result.instrumental)
+        XCTAssertEqual(vocals.frameLength, original.frameLength)
+        XCTAssertEqual(instrumental.frameLength, original.frameLength)
+        XCTAssertEqual(result.duration, Double(original.frameLength) / 44100, accuracy: 1e-9)
+        for channel in 0..<2 {
+            for index in 0..<Int(original.frameLength) {
+                let sum = vocals.floatChannelData![channel][index] + instrumental.floatChannelData![channel][index]
+                guard sum.isFinite && abs(sum - original.floatChannelData![channel][index]) < 1e-6 else {
+                    XCTFail("Nonfinite or unaligned compressed output at \(index)"); return
+                }
+            }
+        }
+    }
 
     /// Verify non-full tail, overlap, reconstruction AND the model's primary stem routing.
     private func streaming(configuration: ModelConfiguration, name: String) async throws {

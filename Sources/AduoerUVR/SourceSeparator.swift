@@ -65,9 +65,11 @@ public actor SourceSeparator {
                 }
                 source.framePosition = AVAudioFramePosition(left)
                 try source.read(into: input, frameCount: input.frameCapacity)
-                guard input.frameLength == right - left, let channels = input.floatChannelData else {
-                    throw SeparationError.invalidAudio
+                guard input.frameLength == right - left else {
+                    throw SeparationError.incompleteRead(expected: right - left, actual: Int(input.frameLength),
+                                                        position: Int64(left), length: source.length)
                 }
+                guard let channels = input.floatChannelData else { throw SeparationError.invalidAudio }
                 let primary = try predict(input)
                 try Task.checkCancellation()
                 guard primary.count == 2, primary.allSatisfy({ $0.count == Int(input.frameLength) }) else {

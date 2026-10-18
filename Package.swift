@@ -10,6 +10,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "AduoerUVR", linkerSettings: [.linkedFramework("Accelerate"), .linkedFramework("CoreML")]),
-        .testTarget(name: "AduoerUVRTests", dependencies: ["AduoerUVR"]),
+        .testTarget(name: "AduoerUVRTests", dependencies: ["AduoerUVR"], resources: [.copy("Fixtures")]),
     ]
 )
