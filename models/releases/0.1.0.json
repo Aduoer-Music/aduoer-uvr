@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "release": "coreml-fp16-v1",
-  "baseURL": "https://github.com/Aduoer-Music/aduoer-uvr/releases/download/coreml-fp16-v1",
+  "release": "0.1.0",
+  "baseURL": "https://github.com/Aduoer-Music/aduoer-uvr/releases/download/0.1.0",
   "models": [
     {
       "id": "mdx9482",
-      "version": "coreml-fp16-v1",
+      "version": "0.1.0",
       "packageName": "UVR9482FP16.mlpackage",
       "files": [
         {
@@ -30,7 +30,7 @@
     },
     {
       "id": "instHQ3",
-      "version": "coreml-fp16-v1",
+      "version": "0.1.0",
       "packageName": "UVRInstHQ3FP16.mlpackage",
       "files": [
         {

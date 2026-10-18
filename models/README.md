@@ -9,7 +9,7 @@
 
 下载来源和 SHA-256 固定在 `../dependencies.lock.json`。
 
-已转换的 FP16 模型发布在 [Core ML FP16 v1](https://github.com/Aduoer-Music/aduoer-uvr/releases/tag/coreml-fp16-v1)。下载后的每个文件必须按 [固定清单](releases/coreml-fp16-v1.json) 校验大小和 SHA-256，再还原 `.mlpackage` 并在使用设备上编译。可使用 Swift 包的 `RemoteModelStore`，由用户手动触发下载，后续离线读取。
+已转换的 FP16 模型发布在 [0.1.0](https://github.com/Aduoer-Music/aduoer-uvr/releases/tag/0.1.0)。下载后的每个文件必须按 [固定清单](releases/0.1.0.json) 校验大小和 SHA-256，再还原 `.mlpackage` 并在使用设备上编译。可使用 Swift 包的 `RemoteModelStore`，由用户手动触发下载，后续离线读取。
 
 上游：[TRvlvr/model_repo](https://github.com/TRvlvr/model_repo)、[sherpa-onnx 模型发布页](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models)。参数来源：[UVR 模型配置](https://github.com/TRvlvr/application_data/blob/main/mdx_model_data/model_data.json)。
 

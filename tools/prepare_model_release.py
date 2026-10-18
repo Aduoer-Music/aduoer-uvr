@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--tag", default="coreml-fp16-v1")
+    parser.add_argument("--tag", default="0.1.0")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     base = f"https://github.com/Aduoer-Music/aduoer-uvr/releases/download/{args.tag}"

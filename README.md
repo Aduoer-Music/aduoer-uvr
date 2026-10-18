@@ -73,7 +73,7 @@ python3.9 -m venv .native-venv
 
 ### 下载已转换的模型
 
-固定版本：[Core ML FP16 v1](https://github.com/Aduoer-Music/aduoer-uvr/releases/tag/coreml-fp16-v1)。9482 约 15 MB，Inst_HQ_3 约 33.5 MB。Release 中的 `models.json` 记录每个文件的路径、大小与 SHA-256；相同清单保存在 [models/releases/coreml-fp16-v1.json](models/releases/coreml-fp16-v1.json)。权重不受本项目 Apache 2.0 代码许可覆盖，详见 [模型说明](models/MODEL_NOTICES.md)。
+固定版本：[0.1.0](https://github.com/Aduoer-Music/aduoer-uvr/releases/tag/0.1.0)。9482 约 15 MB，Inst_HQ_3 约 33.5 MB。Release 中的 `models.json` 记录每个文件的路径、大小与 SHA-256；相同清单保存在 [models/releases/0.1.0.json](models/releases/0.1.0.json)。权重不受本项目 Apache 2.0 代码许可覆盖，详见 [模型说明](models/MODEL_NOTICES.md)。
 
 `RemoteModelStore` 逐文件下载并校验，重建 `.mlpackage`，在当前设备编译后原子保存。模型文件流式写盘，编译成功后删除下载源包；完成后无需联网即可复用。请在用户明确点击下载后调用 `prepare`，选择模型和进入演唱模式只检查 `cachedModelURL`。
 
