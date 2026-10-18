@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aduoer UVR 试听</title>
+<style>body{font:16px system-ui;max-width:850px;margin:32px auto;padding:16px;background:#111923;color:#f4f7fc}section{margin:24px 0;padding:20px;background:#202c3a;border-radius:14px}audio{width:100%}label{display:block;margin-top:16px}button,input{font:inherit;padding:8px}a{color:#83ceee}</style>
+<h1>Aduoer UVR 试听</h1><p>同一首歌 01:00–01:20 的片段。仅允许一个播放器同时播放；切换音轨可使用“同步位置”对齐。</p>
+
+<section><h2>Round We Go</h2><button type="button" data-sync>同步位置</button>
+<label>原曲<audio controls preload="none" src="round-we-go-original.mp3"></audio></label>
+<label>9482 人声<audio controls preload="none" src="round-we-go-9482-vocals.mp3"></audio></label>
+<label>9482 伴奏<audio controls preload="none" src="round-we-go-9482-instrumental.mp3"></audio></label>
+<label>Inst_HQ_3 人声<audio controls preload="none" src="round-we-go-hq3-vocals.mp3"></audio></label>
+<label>Inst_HQ_3 伴奏<audio controls preload="none" src="round-we-go-hq3-instrumental.mp3"></audio></label>
+</section>
+<section><h2>IF YOU</h2><button type="button" data-sync>同步位置</button>
+<label>原曲<audio controls preload="none" src="if-you-original.mp3"></audio></label>
+<label>9482 人声<audio controls preload="none" src="if-you-9482-vocals.mp3"></audio></label>
+<label>9482 伴奏<audio controls preload="none" src="if-you-9482-instrumental.mp3"></audio></label>
+<label>Inst_HQ_3 人声<audio controls preload="none" src="if-you-hq3-vocals.mp3"></audio></label>
+<label>Inst_HQ_3 伴奏<audio controls preload="none" src="if-you-hq3-instrumental.mp3"></audio></label>
+</section>
+<p>试听音频版权归各自权利人，不适用项目的 Apache 2.0 代码许可。</p>
+<script>
+let active;
+document.querySelectorAll('audio').forEach(audio=>audio.addEventListener('play',()=>{
+ document.querySelectorAll('audio').forEach(other=>{if(other!==audio)other.pause()});active=audio;
+}));
+document.querySelectorAll('[data-sync]').forEach(button=>button.addEventListener('click',()=>{
+ const section=button.closest('section'); const source=section.contains(active)?active:null;
+ const time=source?source.currentTime:0;
+ section.querySelectorAll('audio').forEach(audio=>{
+  if(audio.readyState)audio.currentTime=time;
+  else{audio.addEventListener('loadedmetadata',()=>{audio.currentTime=time},{once:true});audio.load()}
+ });
+}));
+</script></html>

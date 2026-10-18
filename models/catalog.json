@@ -1,0 +1,28 @@
+{
+  "mdx9482": {
+    "name": "UVR_MDXNET_9482",
+    "source": "UVR_MDXNET_9482-upstream.onnx",
+    "package": "UVR9482FP16.mlpackage",
+    "fft": 6144,
+    "hop": 1024,
+    "bins": 2048,
+    "time_frames": 256,
+    "primary_stem": "vocals",
+    "output_name": "vocals",
+    "compensation_applied": false,
+    "weight_license": "unverified; not covered by this repository's Apache-2.0 license"
+  },
+  "instHQ3": {
+    "name": "UVR-MDX-NET-Inst_HQ_3",
+    "source": "UVR-MDX-NET-Inst_HQ_3.onnx",
+    "package": "UVRInstHQ3FP16.mlpackage",
+    "fft": 6144,
+    "hop": 1024,
+    "bins": 3072,
+    "time_frames": 256,
+    "primary_stem": "instrumental",
+    "output_name": "primary",
+    "compensation_applied": false,
+    "weight_license": "unverified; not covered by this repository's Apache-2.0 license"
+  }
+}

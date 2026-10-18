@@ -1,0 +1,14 @@
+[
+  {
+    "name": "UVR-MDX-NET-Inst_HQ_3.onnx",
+    "size": 66759522,
+    "sha256": "c207b845d51dc1303c543503f6f5a8b596da5d7de97bead77b3e16ec38e8d5b3",
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/UVR-MDX-NET-Inst_HQ_3.onnx"
+  },
+  {
+    "name": "UVR_MDXNET_9482.onnx",
+    "size": 29704738,
+    "sha256": "9d78f8566fa8198065214ab628be1de966a500c57786695aa4b13e2b27a7727d",
+    "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/UVR_MDXNET_9482.onnx"
+  }
+]

@@ -1,0 +1,8 @@
+torch==2.2.2
+torchvision==0.17.2
+coremltools==8.3.0
+onnx==1.17.0
+onnx2torch==1.5.15
+onnxruntime==1.19.2
+numpy==1.26.4
+soundfile==0.13.1
