@@ -23,3 +23,5 @@ reports/
 *.p8
 *.mobileprovision
 *.key
+_site/
+.pages-venv/

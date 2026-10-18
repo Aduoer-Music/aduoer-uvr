@@ -21,22 +21,18 @@ iPhone 17 / iOS 27，每个案例各测试一次。耗时包含解码、模型�
 
 ## 试听
 
-每组使用同一首歌 01:00–01:20 的片段，统一降低音量以留出播放余量。下列视频依次播放：**00:00 原曲 → 00:20 9482 伴奏 → 00:40 Inst_HQ_3 伴奏**。
+[打开在线试听页面](https://aduoer-music.github.io/aduoer-uvr/)，直接播放原曲、9482 与 Inst_HQ_3 的人声和伴奏。
 
-### Round We Go
+每组使用同一首歌 01:00–01:20 的片段，统一降低音量以留出播放余量。
 
-<video controls src="https://github.com/Aduoer-Music/aduoer-uvr/raw/refs/heads/main/samples/round-we-go-comparison.mp4"></video>
-
-### IF YOU
-
-<video controls src="https://github.com/Aduoer-Music/aduoer-uvr/raw/refs/heads/main/samples/if-you-comparison.mp4"></video>
+### 独立音轨下载
 
 | 歌曲 | 原曲 | 9482 人声 | 9482 伴奏 | Inst_HQ_3 人声 | Inst_HQ_3 伴奏 |
 |---|---|---|---|---|---|
-| Round We Go | [播放](samples/round-we-go-original.mp3) | [播放](samples/round-we-go-9482-vocals.mp3) | [播放](samples/round-we-go-9482-instrumental.mp3) | [播放](samples/round-we-go-hq3-vocals.mp3) | [播放](samples/round-we-go-hq3-instrumental.mp3) |
-| IF YOU | [播放](samples/if-you-original.mp3) | [播放](samples/if-you-9482-vocals.mp3) | [播放](samples/if-you-9482-instrumental.mp3) | [播放](samples/if-you-hq3-vocals.mp3) | [播放](samples/if-you-hq3-instrumental.mp3) |
+| Round We Go | [下载](samples/round-we-go-original.mp3?raw=true) | [下载](samples/round-we-go-9482-vocals.mp3?raw=true) | [下载](samples/round-we-go-9482-instrumental.mp3?raw=true) | [下载](samples/round-we-go-hq3-vocals.mp3?raw=true) | [下载](samples/round-we-go-hq3-instrumental.mp3?raw=true) |
+| IF YOU | [下载](samples/if-you-original.mp3?raw=true) | [下载](samples/if-you-9482-vocals.mp3?raw=true) | [下载](samples/if-you-9482-instrumental.mp3?raw=true) | [下载](samples/if-you-hq3-vocals.mp3?raw=true) | [下载](samples/if-you-hq3-instrumental.mp3?raw=true) |
 
-下载仓库后，也可直接用浏览器打开 [试听页](samples/index.html) 单独播放、同步定位对照。音频片段及原曲版权归各自权利人，不适用本项目的 Apache 2.0 代码许可。
+试听音频片段及原曲版权归各自权利人，不适用本项目的 Apache 2.0 代码许可。
 
 ## 接入
 
