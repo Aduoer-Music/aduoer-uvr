@@ -43,6 +43,42 @@ final class RemoteModelStoreTests: XCTestCase {
         }
     }
 
+    func testForceDownloadFetchesAndCompilesAnAlreadyInstalledModel() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(); defer { session.invalidateAndCancel() }
+        ModelAssetURLProtocol.body = payload
+        let events = ModelEventCollector()
+        let store = RemoteModelStore(directory: root, session: session, compiler: { try Self.fakeCompile($0) })
+        let model = descriptor()
+        let first = try await store.prepare(model, baseURL: baseURL)
+        let replaced = try await store.prepare(model, baseURL: baseURL, forceDownload: true) { events.append($0) }
+        XCTAssertEqual(first, replaced)
+        XCTAssertEqual(ModelAssetURLProtocol.requestCount, 2, "Redownload must bypass the installed-model cache")
+        XCTAssertTrue(events.values.contains(.compiling))
+        XCTAssertEqual(events.values.last, .ready)
+        let cached = try await store.cachedModelURL(for: model)
+        XCTAssertEqual(cached, replaced)
+    }
+
+    func testFailedRedownloadPreservesTheExistingInstallation() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(); defer { session.invalidateAndCancel() }
+        ModelAssetURLProtocol.body = payload
+        let store = RemoteModelStore(directory: root, session: session, compiler: { try Self.fakeCompile($0) })
+        let model = descriptor()
+        let first = try await store.prepare(model, baseURL: baseURL)
+        ModelAssetURLProtocol.body = Data(repeating: 0, count: payload.count)
+        do {
+            _ = try await store.prepare(model, baseURL: baseURL, forceDownload: true)
+            XCTFail("Expected checksum failure")
+        } catch ModelDownloadError.checksumMismatch {}
+        let cached = try await store.prepare(model, baseURL: baseURL)
+        XCTAssertEqual(cached, first)
+        XCTAssertEqual(ModelAssetURLProtocol.requestCount, 2, "Old verified installation remains usable offline")
+        XCTAssertEqual(try Data(contentsOf: first.appendingPathComponent("coremldata.bin")), Data("compiled".utf8))
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: root.path).contains { $0.hasPrefix(".preparing-") })
+    }
+
     func testReportsByteProgressBeforeDownloadFinishes() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = session(); defer { session.invalidateAndCancel() }

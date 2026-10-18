@@ -32,11 +32,13 @@ public actor RemoteModelStore {
     }
 
     /// Concurrent requests share one installation. Cancellation cancels that shared preparation.
+    /// Force downloading bypasses a ready installation, preserving it until its replacement is verified and compiled.
     public func prepare(_ model: RemoteModelDescriptor, baseURL: URL,
+                        forceDownload: Bool = false,
                         progress: @escaping @Sendable (ModelPreparationProgress) -> Void = { _ in }) async throws -> URL {
         try Task.checkCancellation()
         try Self.validate(model, baseURL: baseURL)
-        if let cached = try cachedModelURL(for: model) { progress(.ready); return cached }
+        if !forceDownload, let cached = try cachedModelURL(for: model) { progress(.ready); return cached }
         let key = try Self.fingerprint(model)
         let flight: Flight
         if let current = flights[key] {

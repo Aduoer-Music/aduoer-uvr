@@ -91,6 +91,8 @@ let installedURL = try await store.cachedModelURL(for: descriptor)
 
 客户端应内置经过审核的固定清单，不能直接信任网络清单来替换校验值。发布者可用 `tools/prepare_model_release.py` 生成资产，更新模型时使用新的版本标签，不替换旧版文件。
 
+用户手动选择重新下载时，可传入 `prepare(descriptor, baseURL: catalog.baseURL, forceDownload: true)`，即使已有安装也会重新获取、校验并编译。下载或校验失败时保留原有安装。
+
 ## 测试
 
 ```sh
