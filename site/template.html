@@ -41,15 +41,21 @@
     document.querySelectorAll('audio').forEach(audio => {
       audio.addEventListener('play', () => {
         const previous = active;
+        active = audio;
         if (previous && previous !== audio) {
           const sameSong = previous.closest('.song') === audio.closest('.song');
           const time = previous.ended ? 0 : previous.currentTime;
           previous.pause();
-          if (sameSong && Number.isFinite(audio.duration)) {
-            audio.currentTime = Math.min(time, Math.max(0, audio.duration - 0.05));
+          if (sameSong) {
+            const align = () => {
+              if (active === audio && Number.isFinite(audio.duration)) {
+                audio.currentTime = Math.min(time, Math.max(0, audio.duration - 0.05));
+              }
+            };
+            if (Number.isFinite(audio.duration)) align();
+            else audio.addEventListener('loadedmetadata', align, {once: true});
           }
         }
-        active = audio;
       });
       audio.addEventListener('error', () => {
         const track = audio.closest('.track');
