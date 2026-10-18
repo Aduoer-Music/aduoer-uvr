@@ -10,6 +10,29 @@ final class RemoteModelStoreTests: XCTestCase {
 
     override func setUp() { super.setUp(); ModelAssetURLProtocol.reset() }
 
+    func testCommitSwapsCompleteInstallationsBeforeOldFilesAreRemoved() throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("installed")
+        let staging = root.appendingPathComponent(".preparing-new")
+        for (url, value) in [(target, "old"), (staging, "new")] {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try Data(value.utf8).write(to: url.appendingPathComponent("model.bin"))
+        }
+        try RemoteModelStore.commitInstallation(from: staging, to: target)
+        XCTAssertEqual(try Data(contentsOf: target.appendingPathComponent("model.bin")), Data("new".utf8))
+        XCTAssertEqual(try Data(contentsOf: staging.appendingPathComponent("model.bin")), Data("old".utf8))
+    }
+
+    func testCommitFailurePreservesOldInstallation() throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("installed")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let receipt = target.appendingPathComponent("ready.json")
+        try payload.write(to: receipt)
+        XCTAssertThrowsError(try RemoteModelStore.commitInstallation(from: root.appendingPathComponent("missing"), to: target))
+        XCTAssertEqual(try Data(contentsOf: receipt), payload)
+    }
+
     func testVerifiedPackageCompilesAndReloadsOfflineWithoutRequests() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = session(); defer { session.invalidateAndCancel() }

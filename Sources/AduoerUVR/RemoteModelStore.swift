@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import CoreML
 import CryptoKit
+import Darwin
 import Foundation
 
 /// Downloads pinned package files to disk, verifies them, then compiles and atomically installs.
@@ -176,12 +177,19 @@ public actor RemoteModelStore {
         try manager.removeItem(at: package)
         try receipt(model).write(to: staging.appendingPathComponent("ready.json"), options: .atomic)
         let target = try target(model, directory: directory)
-        // Only this actor's shared flight installs a given fingerprint.
-        if manager.fileExists(atPath: target.path) { try manager.removeItem(at: target) }
-        try manager.moveItem(at: staging, to: target)
+        try commitInstallation(from: staging, to: target)
         try removePreviousVersions(of: model, keeping: target, directory: directory)
         progress.send(.ready)
         return target.appendingPathComponent("model.mlmodelc", isDirectory: true)
+    }
+
+    /// Commit with one filesystem operation. A failed swap leaves the old installation intact;
+    /// a successful swap leaves it at staging, where the installer's defer removes it.
+    static func commitInstallation(from staging: URL, to target: URL) throws {
+        let flags = FileManager.default.fileExists(atPath: target.path) ? RENAME_SWAP : RENAME_EXCL
+        guard renamex_np(staging.path, target.path, UInt32(flags)) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
     }
 
     /// Only completed installations for the same model ID qualify; other models and active staging are untouched.

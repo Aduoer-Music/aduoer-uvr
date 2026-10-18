@@ -38,8 +38,8 @@ final class OracleValidationTests: XCTestCase {
         let model = try NativeCoreMLSourceModel(url: modelURL, configuration: configuration, computeUnits: .all)
         let actual = try model.predict(pcm).flatMap { $0 }
         XCTAssertTrue(actual.allSatisfy { $0.isFinite })
-        let waveformError = metrics(actual, referencePrimary)
-        XCTAssertLessThan(waveformError["relative_rms"]!, 0.02)
+        let waveformError = FP16WaveformAccuracy(actual: actual, reference: referencePrimary, input: input)
+        XCTAssertTrue(waveformError.isAcceptable, "\(waveformError)")
 
     }
 

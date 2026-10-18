@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def metrics(actual, expected):
     delta = actual.astype(np.float64) - expected.astype(np.float64)
     return dict(relative_rms=float(np.sqrt(np.mean(delta**2) / max(np.mean(expected.astype(np.float64)**2), 1e-20))),
+                error_rms=float(np.sqrt(np.mean(delta**2))),
+                reference_rms=float(np.sqrt(np.mean(expected.astype(np.float64)**2))),
                 max_abs=float(np.max(np.abs(delta))), finite=bool(np.isfinite(actual).all()))
 
 
@@ -30,6 +32,15 @@ def spectrogram(pcm, config):
                           window=torch.hann_window(fft), center=True, return_complex=True)
     return np.stack([spectrum[0].real[:bins].numpy(), spectrum[0].imag[:bins].numpy(),
                      spectrum[1].real[:bins].numpy(), spectrum[1].imag[:bins].numpy()])[None].copy()
+
+
+def waveform(spectrum, config, frames):
+    full = np.zeros((2, config['fft']//2+1, config['time_frames']), dtype=np.complex64)
+    full[0, :config['bins']] = spectrum[0, 0] + 1j*spectrum[0, 1]
+    full[1, :config['bins']] = spectrum[0, 2] + 1j*spectrum[0, 3]
+    primary = torch.istft(torch.from_numpy(full), n_fft=config['fft'], hop_length=config['hop'],
+                          window=torch.hann_window(config['fft']), center=True).numpy()
+    return primary[:, config['fft']//2:config['fft']//2+frames].copy()
 
 
 def main():
@@ -71,17 +82,20 @@ def main():
     pcm = np.stack([0.3*np.sin(2*np.pi*440*time_axis), 0.25*np.sin(2*np.pi*523.25*time_axis)])
     x = spectrogram(pcm, config)
     y = session.run(None, {input_name: x})[0]
-    music_error = metrics(converted.predict({'spectrogram': x})[config['output_name']], y)
+    predicted_audio = converted.predict({'spectrogram': x})[config['output_name']]
+    music_error = metrics(predicted_audio, y)
     print('Audio FP16 / ONNX', music_error, flush=True)
     assert music_error['finite'] and music_error['relative_rms'] < 0.02
+    primary = waveform(y, config, pcm.shape[1])
+    waveform_error = metrics(waveform(predicted_audio, config, pcm.shape[1]), primary)
+    input_rms = float(np.sqrt(np.mean(pcm.astype(np.float64)**2)))
+    # Same mixed error budget as Swift's oracle tests; preserve the 2% relative component.
+    waveform_error['limit'] = 0.02 * waveform_error['reference_rms'] + 0.0002 * input_rms
+    print('Waveform FP16 / ONNX', waveform_error, flush=True)
+    assert waveform_error['finite'] and waveform_error['error_rms'] <= waveform_error['limit']
     oracle = ROOT / '.deps/oracles' / args.model; oracle.mkdir(parents=True, exist_ok=True)
     pcm.tofile(oracle / 'input.f32'); x.tofile(oracle / 'spectrum.f32'); y.tofile(oracle / 'output-spectrum.f32')
-    full = np.zeros((2, config['fft']//2+1, config['time_frames']), dtype=np.complex64)
-    full[0, :config['bins']] = y[0, 0] + 1j*y[0, 1]
-    full[1, :config['bins']] = y[0, 2] + 1j*y[0, 3]
-    primary = torch.istft(torch.from_numpy(full), n_fft=config['fft'], hop_length=config['hop'],
-                          window=torch.hann_window(config['fft']), center=True).numpy()
-    primary[:, config['fft']//2:config['fft']//2+220500].copy().tofile(oracle / 'primary.f32')
+    primary.tofile(oracle / 'primary.f32')
     print(target, flush=True)
 
 
