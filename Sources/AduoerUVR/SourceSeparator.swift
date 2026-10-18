@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import AVFoundation
+import Accelerate
 import CoreML
 import Foundation
 
@@ -41,7 +42,7 @@ public actor SourceSeparator {
     }
 
     /// 每块仅提交不会被下一块覆盖的前缀，最后一块写完整尾部；保证无丢帧、无重复帧。
-    private func process(
+    func process(
         _ source: AVAudioFile, vocals: URL, instrumental: URL,
         configuration: ModelConfiguration, progress: @Sendable (Double) -> Void,
         predict: (AVAudioPCMBuffer) throws -> [[Float]]
@@ -51,7 +52,10 @@ public actor SourceSeparator {
         let instrumentalWriter = try AVAudioFile(forWriting: instrumental, settings: format.settings)
         let frames = Int(source.length)
         var tail = [[Float]](repeating: [], count: 2)
-        var tailWeights: [Float] = []
+        let fadeIn = (1...overlap).map { Float($0) / Float(overlap + 1) }
+        let fadeOut = Array(fadeIn.reversed())
+        var combinedWeights = [Float](repeating: 0, count: overlap)
+        vDSP_vadd(fadeIn, 1, fadeOut, 1, &combinedWeights, 1, vDSP_Length(overlap))
         var start = 0
         progress(0)
         while start < frames {
@@ -84,34 +88,32 @@ public actor SourceSeparator {
                 vocalBuffer.frameLength = AVAudioFrameCount(written)
                 instrumentalBuffer.frameLength = AVAudioFrameCount(written)
                 var nextTail = [[Float]](repeating: [], count: 2)
-                var nextWeights: [Float] = []
-                for index in 0..<count {
-                    var weight: Float = 1
-                    if start > 0 && index < overlap { weight *= Float(index + 1) / Float(overlap + 1) }
-                    if end < frames && count - index <= overlap { weight *= Float(count - index) / Float(overlap + 1) }
-                    for channel in 0..<2 {
-                        let value = primary[channel][start - left + index]
-                        guard value.isFinite else { throw SeparationError.invalidOutput }
-                        let combined: Float
-                        if index < tailWeights.count {
-                            combined = (value * weight + tail[channel][index]) / (weight + tailWeights[index])
-                        } else {
-                            combined = value
+                for channel in 0..<2 {
+                    try primary[channel].withUnsafeBufferPointer { samples in
+                        let values = samples.baseAddress!.advanced(by: start - left)
+                        guard UnsafeBufferPointer(start: values, count: count).allSatisfy(\.isFinite) else {
+                            throw SeparationError.invalidOutput
                         }
-                        if index < written {
-                            let residual = channels[channel][start - left + index] - combined
-                            vocalData[channel][index] = configuration.primaryStem == .vocals ? combined : residual
-                            instrumentalData[channel][index] = configuration.primaryStem == .instrumental ? combined : residual
-                        } else {
-                            nextTail[channel].append(value * weight)
+                        let primaryData = configuration.primaryStem == .vocals ? vocalData[channel] : instrumentalData[channel]
+                        let residualData = configuration.primaryStem == .vocals ? instrumentalData[channel] : vocalData[channel]
+                        primaryData.update(from: values, count: written)
+                        if start > 0 {
+                            vDSP_vmul(values, 1, fadeIn, 1, primaryData, 1, vDSP_Length(overlap))
+                            vDSP_vadd(primaryData, 1, tail[channel], 1, primaryData, 1, vDSP_Length(overlap))
+                            vDSP_vdiv(combinedWeights, 1, primaryData, 1, primaryData, 1, vDSP_Length(overlap))
+                        }
+                        vDSP_vsub(primaryData, 1, channels[channel].advanced(by: start - left), 1,
+                                  residualData, 1, vDSP_Length(written))
+                        if end < frames {
+                            nextTail[channel] = [Float](repeating: 0, count: overlap)
+                            vDSP_vmul(values.advanced(by: written), 1, fadeOut, 1,
+                                      &nextTail[channel], 1, vDSP_Length(overlap))
                         }
                     }
-                    if index >= written { nextWeights.append(weight) }
                 }
                 try vocalWriter.write(from: vocalBuffer)
                 try instrumentalWriter.write(from: instrumentalBuffer)
                 tail = nextTail
-                tailWeights = nextWeights
             }
             progress(Double(end) / Double(frames))
             if end == frames { break }

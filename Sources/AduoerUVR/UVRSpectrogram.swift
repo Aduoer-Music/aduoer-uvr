@@ -36,8 +36,13 @@ final class UVRSpectrogram {
         let window = (0..<fft).map { Float(0.5 - 0.5 * cos(2 * Double.pi * Double($0) / Double(fft))) }
         self.window = window
         var weights = [Float](repeating: 0, count: segment + fft)
-        for time in 0..<times {
-            for index in 0..<fft { weights[time * hop + index] += window[index] * window[index] }
+        var squaredWindow = [Float](repeating: 0, count: fft)
+        vDSP_vsq(window, 1, &squaredWindow, 1, vDSP_Length(fft))
+        weights.withUnsafeMutableBufferPointer { buffer in
+            for time in 0..<times {
+                let destination = buffer.baseAddress!.advanced(by: time * hop)
+                vDSP_vadd(destination, 1, squaredWindow, 1, destination, 1, vDSP_Length(fft))
+            }
         }
         denominator = weights
     }
@@ -57,21 +62,25 @@ final class UVRSpectrogram {
         var transformedReal = zero
         var transformedImag = zero
         for channel in 0..<2 {
-            var padded = [Float](repeating: 0, count: segment)
+            // Materialize center-reflect padding once, then window and copy complete vectors.
+            // Keeping the per-sample work in Accelerate also makes ordinary Debug builds fast.
+            var padded = [Float](repeating: 0, count: segment + fft)
             padded.withUnsafeMutableBufferPointer { buffer in
-                buffer.baseAddress!.advanced(by: fft / 2).update(from: channels[channel], count: frames)
-            }
-            for time in 0..<times {
-                for index in 0..<fft {
-                    var position = time * hop + index - fft / 2
-                    if position < 0 { position = -position }
-                    if position >= segment { position = 2 * segment - 2 - position }
-                    real[index] = padded[position] * window[index]
-                }
-                vDSP_DFT_Execute(forward, real, zero, &transformedReal, &transformedImag)
-                for frequency in 0..<bins {
-                    destination[(channel * 2 * bins + frequency) * times + time] = transformedReal[frequency]
-                    destination[((channel * 2 + 1) * bins + frequency) * times + time] = transformedImag[frequency]
+                let base = buffer.baseAddress!
+                let half = fft / 2
+                base.advanced(by: fft).update(from: channels[channel], count: frames)
+                base.update(from: base.advanced(by: half + 1), count: half)
+                vDSP_vrvrs(base, 1, vDSP_Length(half))
+                let right = base.advanced(by: half + segment)
+                right.update(from: base.advanced(by: segment - 1), count: half)
+                vDSP_vrvrs(right, 1, vDSP_Length(half))
+                for time in 0..<times {
+                    vDSP_vmul(base.advanced(by: time * hop), 1, window, 1, &real, 1, vDSP_Length(fft))
+                    vDSP_DFT_Execute(forward, real, zero, &transformedReal, &transformedImag)
+                    vDSP_mmov(transformedReal, destination.advanced(by: channel * 2 * bins * times + time),
+                              1, vDSP_Length(bins), 1, vDSP_Length(times))
+                    vDSP_mmov(transformedImag, destination.advanced(by: (channel * 2 + 1) * bins * times + time),
+                              1, vDSP_Length(bins), 1, vDSP_Length(times))
                 }
             }
         }
@@ -92,27 +101,40 @@ final class UVRSpectrogram {
         var channels: [[Float]] = []
         for channel in 0..<2 {
             var accumulated = [Float](repeating: 0, count: denominator.count)
-            for time in 0..<times {
-                for frequency in 0..<bins {
-                    let offset = frequency * strides[2] + time * strides[3]
-                    real[frequency] = values[channel * 2 * strides[1] + offset]
-                    imag[frequency] = frequency == 0 ? 0 : values[(channel * 2 + 1) * strides[1] + offset]
-                    if frequency > 0 {
-                        real[fft - frequency] = real[frequency]
-                        imag[fft - frequency] = -imag[frequency]
+            accumulated.withUnsafeMutableBufferPointer { accumulation in
+                for time in 0..<times {
+                    let offset = time * strides[3]
+                    vDSP_mmov(values.advanced(by: channel * 2 * strides[1] + offset), &real,
+                              1, vDSP_Length(bins), vDSP_Length(strides[2]), 1)
+                    vDSP_mmov(values.advanced(by: (channel * 2 + 1) * strides[1] + offset), &imag,
+                              1, vDSP_Length(bins), vDSP_Length(strides[2]), 1)
+                    imag[0] = 0
+                    real.withUnsafeMutableBufferPointer { buffer in
+                        let mirror = buffer.baseAddress!.advanced(by: fft - bins + 1)
+                        mirror.update(from: buffer.baseAddress!.advanced(by: 1), count: bins - 1)
+                        vDSP_vrvrs(mirror, 1, vDSP_Length(bins - 1))
                     }
-                }
-                vDSP_DFT_Execute(inverse, real, imag, &waveform, &ignoredImag)
-                for index in 0..<fft {
-                    accumulated[time * hop + index] += waveform[index] * window[index] / Float(fft)
+                    imag.withUnsafeMutableBufferPointer { buffer in
+                        let mirror = buffer.baseAddress!.advanced(by: fft - bins + 1)
+                        vDSP_vneg(buffer.baseAddress!.advanced(by: 1), 1, mirror, 1, vDSP_Length(bins - 1))
+                        vDSP_vrvrs(mirror, 1, vDSP_Length(bins - 1))
+                    }
+                    vDSP_DFT_Execute(inverse, real, imag, &waveform, &ignoredImag)
+                    vDSP_vmul(waveform, 1, window, 1, &waveform, 1, vDSP_Length(fft))
+                    var scale = Float(fft)
+                    vDSP_vsdiv(waveform, 1, &scale, &waveform, 1, vDSP_Length(fft))
+                    let destination = accumulation.baseAddress!.advanced(by: time * hop)
+                    vDSP_vadd(destination, 1, waveform, 1, destination, 1, vDSP_Length(fft))
                 }
             }
             var output = [Float](repeating: 0, count: frames)
-            for index in 0..<frames {
-                let position = fft + index
-                output[index] = accumulated[position] / denominator[position]
-                guard output[index].isFinite else { throw SeparationError.invalidOutput }
+            accumulated.withUnsafeBufferPointer { signal in
+                denominator.withUnsafeBufferPointer { weights in
+                    vDSP_vdiv(weights.baseAddress!.advanced(by: fft), 1, signal.baseAddress!.advanced(by: fft),
+                              1, &output, 1, vDSP_Length(frames))
+                }
             }
+            guard output.allSatisfy(\.isFinite) else { throw SeparationError.invalidOutput }
             channels.append(output)
         }
         return channels
