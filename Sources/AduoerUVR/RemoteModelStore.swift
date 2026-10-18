@@ -16,6 +16,8 @@ public actor RemoteModelStore {
     private let session: URLSession
     private let compiler: Compiler
     private var flights: [String: Flight] = [:]
+    private var removal: Task<Void, Error>?
+    private var removalGeneration: UInt64 = 0
 
     public init(directory: URL, session: URLSession? = nil,
                 compiler: @escaping Compiler = { try await MLModel.compileModel(at: $0) }) {
@@ -37,8 +39,14 @@ public actor RemoteModelStore {
                         forceDownload: Bool = false,
                         progress: @escaping @Sendable (ModelPreparationProgress) -> Void = { _ in }) async throws -> URL {
         try Task.checkCancellation()
+        guard removal == nil else { throw CancellationError() }
+        let generation = removalGeneration
         try Self.validate(model, baseURL: baseURL)
-        if !forceDownload, let cached = try cachedModelURL(for: model) { progress(.ready); return cached }
+        if !forceDownload, let cached = try cachedModelURL(for: model) {
+            try Self.removePreviousVersions(of: model, keeping: cached.deletingLastPathComponent(), directory: directory)
+            progress(.ready)
+            return cached
+        }
         let key = try Self.fingerprint(model)
         let flight: Flight
         if let current = flights[key] {
@@ -60,6 +68,7 @@ public actor RemoteModelStore {
             } onCancel: {
                 flight.task.cancel()
             }
+            guard generation == removalGeneration else { throw CancellationError() }
             if flights[key]?.id == flight.id { flights[key] = nil }
             try Task.checkCancellation()
             return url
@@ -75,15 +84,44 @@ public actor RemoteModelStore {
         flights[key]?.task.cancel()
     }
 
-    /// A completion receipt is written only after compilation succeeds. Partial downloads never qualify.
+    /// Cancel and drain downloads/compilation before removing all installations and abandoned staging files.
+    /// New preparations are rejected until removal completes, so a cancelled task cannot recreate deleted files.
+    public func removeAll() async throws {
+        if let removal { return try await removal.value }
+        removalGeneration &+= 1
+        let pending = Array(flights.values)
+        pending.forEach { $0.task.cancel() }
+        flights.removeAll()
+        let directory = directory
+        let task = Task.detached(priority: .utility) {
+            for flight in pending { _ = await flight.task.result }
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.removeItem(at: directory)
+            }
+        }
+        removal = task
+        defer { removal = nil }
+        try await task.value
+    }
+
+    /// Match completed installations by content, independent of release versions, asset names or download location.
+    /// The receipt is written only after compilation; availability checks never move files, compile or download.
     public func cachedModelURL(for model: RemoteModelDescriptor) throws -> URL? {
-        let target = try Self.target(model, directory: directory)
-        let receipt = target.appendingPathComponent("ready.json")
-        let compiled = target.appendingPathComponent("model.mlmodelc", isDirectory: true)
-        guard let data = try? Data(contentsOf: receipt),
-              data == (try Self.receipt(model)),
-              FileManager.default.fileExists(atPath: compiled.appendingPathComponent("coremldata.bin").path) else { return nil }
-        return compiled
+        guard removal == nil else { return nil }
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: directory.path) else { return nil }
+        let key = try Self.fingerprint(model)
+        for entry in try manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey]) {
+            let target = directory.appendingPathComponent(entry.lastPathComponent, isDirectory: true)
+            guard !target.lastPathComponent.hasPrefix("."),
+                  try target.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true,
+                  let data = try? Data(contentsOf: target.appendingPathComponent("ready.json")),
+                  let installed = try? JSONDecoder().decode(RemoteModelDescriptor.self, from: data),
+                  try Self.fingerprint(installed) == key else { continue }
+            let compiled = target.appendingPathComponent("model.mlmodelc", isDirectory: true)
+            if manager.fileExists(atPath: compiled.appendingPathComponent("coremldata.bin").path) { return compiled }
+        }
+        return nil
     }
 
     private static func install(_ model: RemoteModelDescriptor, baseURL: URL, directory: URL,
@@ -141,8 +179,24 @@ public actor RemoteModelStore {
         // Only this actor's shared flight installs a given fingerprint.
         if manager.fileExists(atPath: target.path) { try manager.removeItem(at: target) }
         try manager.moveItem(at: staging, to: target)
+        try removePreviousVersions(of: model, keeping: target, directory: directory)
         progress.send(.ready)
         return target.appendingPathComponent("model.mlmodelc", isDirectory: true)
+    }
+
+    /// Only completed installations for the same model ID qualify; other models and active staging are untouched.
+    private static func removePreviousVersions(of model: RemoteModelDescriptor, keeping target: URL,
+                                              directory: URL) throws {
+        let manager = FileManager.default
+        for candidate in try manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey]) {
+            guard candidate.lastPathComponent != target.lastPathComponent,
+                  !candidate.lastPathComponent.hasPrefix("."),
+                  try candidate.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true,
+                  let data = try? Data(contentsOf: candidate.appendingPathComponent("ready.json")),
+                  let previous = try? JSONDecoder().decode(RemoteModelDescriptor.self, from: data),
+                  previous.id == model.id else { continue }
+            try manager.removeItem(at: candidate)
+        }
     }
 
     private static func target(_ model: RemoteModelDescriptor, directory: URL) throws -> URL {
@@ -155,7 +209,20 @@ public actor RemoteModelStore {
     }
 
     private static func fingerprint(_ model: RemoteModelDescriptor) throws -> String {
-        SHA256.hash(data: try receipt(model)).map { String(format: "%02x", $0) }.joined()
+        struct Content: Encodable {
+            struct File: Encodable {
+                let path: String
+                let bytes: Int64
+                let sha256: String
+            }
+            let id: String
+            let files: [File]
+        }
+        let content = Content(id: model.id, files: model.files.sorted { $0.path < $1.path }.map {
+            Content.File(path: $0.path, bytes: $0.bytes, sha256: $0.sha256)
+        })
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        return SHA256.hash(data: try encoder.encode(content)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func sha256(_ url: URL) throws -> String {

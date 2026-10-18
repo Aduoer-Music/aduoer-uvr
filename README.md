@@ -73,25 +73,31 @@ python3.9 -m venv .native-venv
 
 ### 下载已转换的模型
 
-固定版本：[0.1.0](https://github.com/Aduoer-Music/aduoer-uvr/releases/tag/0.1.0)。9482 约 15 MB，Inst_HQ_3 约 33.5 MB。Release 中的 `models.json` 记录每个文件的路径、大小与 SHA-256；相同清单保存在 [models/releases/0.1.0.json](models/releases/0.1.0.json)。权重不受本项目 Apache 2.0 代码许可覆盖，详见 [模型说明](models/MODEL_NOTICES.md)。
+[下载模型](https://github.com/Aduoer-Music/aduoer-uvr/releases/latest) · [文件清单与 SHA-256](models/releases/0.1.0.json) · [权重许可](models/MODEL_NOTICES.md)
 
-`RemoteModelStore` 逐文件下载并校验，重建 `.mlpackage`，在当前设备编译后原子保存。模型文件流式写盘，编译成功后删除下载源包；完成后无需联网即可复用。请在用户明确点击下载后调用 `prepare`，选择模型和进入演唱模式只检查 `cachedModelURL`。
+| 模型 | 下载大小 |
+| --- | --- |
+| UVR_MDXNET_9482 | 约 15 MB |
+| UVR-MDX-NET-Inst_HQ_3 | 约 33.5 MB |
+
+将指定版本的模型文件清单随 App 一起打包。`RemoteModelStore` 按清单中的固定地址下载并检查文件，在设备上编译模型后即可离线使用。
 
 ```swift
 let catalog = try JSONDecoder().decode(ModelReleaseCatalog.self, from: pinnedCatalogData)
 let descriptor = catalog.models.first { $0.id == "mdx9482" }!
 let store = RemoteModelStore(directory: URL.applicationSupportDirectory.appendingPathComponent("UVRModels"))
-// Only from an explicit download action:
+// 用户点击下载时调用
 let modelURL = try await store.prepare(descriptor, baseURL: catalog.baseURL) { progress in
     // .downloading(fraction), .compiling, .ready
 }
-// Later, offline; returns nil if the selected model has not been downloaded:
+// 检查本地模型，未下载时返回 nil
 let installedURL = try await store.cachedModelURL(for: descriptor)
 ```
 
-客户端应内置经过审核的固定清单，不能直接信任网络清单来替换校验值。发布者可用 `tools/prepare_model_release.py` 生成资产，更新模型时使用新的版本标签，不替换旧版文件。
-
-用户手动选择重新下载时，可传入 `prepare(descriptor, baseURL: catalog.baseURL, forceDownload: true)`，即使已有安装也会重新获取、校验并编译。下载或校验失败时保留原有安装。
+- 模型文件未变时，直接使用已下载的模型，无需重新下载。
+- 更新模型成功后，自动删除该模型的旧版本；更新失败或取消时，保留旧模型。
+- 强制重新下载：调用 `prepare` 时传入 `forceDownload: true`。
+- 删除所有本地模型：先停止推理，再调用 `removeAll()`，它也会取消正在进行的下载并清理临时文件。
 
 ## 测试
 

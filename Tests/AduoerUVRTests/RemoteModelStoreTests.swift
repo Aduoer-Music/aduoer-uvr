@@ -190,16 +190,144 @@ final class RemoteModelStoreTests: XCTestCase {
         XCTAssertNil(cached)
     }
 
-    func testChangedVersionUsesIndependentInstallation() async throws {
+    func testSuccessfulVersionUpdateRemovesOnlyTheSameModelsOldInstallation() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = session(); defer { session.invalidateAndCancel() }
         ModelAssetURLProtocol.body = payload
         let store = RemoteModelStore(directory: root, session: session, compiler: { try Self.fakeCompile($0) })
         let first = try await store.prepare(descriptor(), baseURL: baseURL)
-        let second = try await store.prepare(descriptor(version: "v2"), baseURL: baseURL)
+        let other = try await store.prepare(descriptor(id: "other"), baseURL: baseURL)
+        let updated = Data("updated-manifest".utf8)
+        ModelAssetURLProtocol.body = updated
+        let second = try await store.prepare(descriptor(version: "v2", contents: updated), baseURL: baseURL)
         XCTAssertNotEqual(first, second)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.deletingLastPathComponent().path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.path))
+        XCTAssertEqual(ModelAssetURLProtocol.requestCount, 3)
+    }
+
+    func testFailedVersionUpdateKeepsOldModel() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(); defer { session.invalidateAndCancel() }
+        ModelAssetURLProtocol.body = payload
+        let store = RemoteModelStore(directory: root, session: session, compiler: { try Self.fakeCompile($0) })
+        let first = try await store.prepare(descriptor(), baseURL: baseURL)
+        let updated = Data("updated-manifest".utf8)
+        ModelAssetURLProtocol.body = Data(repeating: 0, count: updated.count)
+        do {
+            _ = try await store.prepare(descriptor(version: "v2", contents: updated), baseURL: baseURL)
+            XCTFail("Expected checksum failure")
+        } catch ModelDownloadError.checksumMismatch {}
+        let cached = try await store.cachedModelURL(for: descriptor())
+        XCTAssertEqual(cached, first)
+    }
+
+    func testManualRemovalDeletesAllModelsAndAbandonedFilesWithoutDownloading() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(); defer { session.invalidateAndCancel() }
+        ModelAssetURLProtocol.body = payload
+        let store = RemoteModelStore(directory: root, session: session, compiler: { try Self.fakeCompile($0) })
+        _ = try await store.prepare(descriptor(), baseURL: baseURL)
+        _ = try await store.prepare(descriptor(id: "other"), baseURL: baseURL)
+        try Data("abandoned".utf8).write(to: root.appendingPathComponent(".preparing-abandoned"))
+        let requests = ModelAssetURLProtocol.requestCount
+        try await store.removeAll()
+        try await store.removeAll()
+        let cached = try await store.cachedModelURL(for: descriptor())
+        XCTAssertNil(cached)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        XCTAssertEqual(ModelAssetURLProtocol.requestCount, requests)
+        _ = try await store.prepare(descriptor(), baseURL: baseURL)
+        XCTAssertEqual(ModelAssetURLProtocol.requestCount, requests + 1)
+    }
+
+    func testCancelledVersionUpdateKeepsOldModel() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(); defer { session.invalidateAndCancel() }
+        ModelAssetURLProtocol.body = payload
+        let originalStore = RemoteModelStore(directory: root, session: session, compiler: { try Self.fakeCompile($0) })
+        let first = try await originalStore.prepare(descriptor(), baseURL: baseURL)
+        let store = RemoteModelStore(directory: root, session: session) { package in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try Self.fakeCompile(package)
+        }
+        let updated = Data("updated-manifest".utf8)
+        ModelAssetURLProtocol.body = updated
+        do {
+            _ = try await store.prepare(descriptor(version: "v2", contents: updated), baseURL: baseURL)
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {}
+        let cached = try await originalStore.cachedModelURL(for: descriptor())
+        XCTAssertEqual(cached, first)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: root.path).contains { $0.hasPrefix(".preparing-") })
+    }
+
+    func testReleaseAndAssetChangesReuseExistingContentsWithoutMovingOrDownloading() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(); defer { session.invalidateAndCancel() }
+        ModelAssetURLProtocol.body = payload
+        let store = RemoteModelStore(directory: root, session: session, compiler: { try Self.fakeCompile($0) })
+        let first = try await store.prepare(descriptor(), baseURL: baseURL)
+        // Installation directories are opaque: receipts from earlier releases remain reusable in place.
+        let existing = root.appendingPathComponent("previous-installation")
+        try FileManager.default.moveItem(at: first.deletingLastPathComponent(), to: existing)
+        let original = descriptor()
+        let renamed = RemoteModelDescriptor(id: original.id, version: "0.1.0", packageName: "Renamed.mlpackage",
+            files: original.files.map { .init(path: $0.path, asset: "renamed.json", bytes: $0.bytes, sha256: $0.sha256) })
+        let requests = ModelAssetURLProtocol.requestCount
+        let cached = try await store.cachedModelURL(for: renamed)
+        XCTAssertEqual(cached, existing.appendingPathComponent("model.mlmodelc", isDirectory: true))
+        let prepared = try await store.prepare(renamed, baseURL: URL(string: "https://new.example/0.1.0")!)
+        XCTAssertEqual(cached, prepared)
+        XCTAssertEqual(ModelAssetURLProtocol.requestCount, requests)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: existing.path))
+        let receipt = try JSONDecoder().decode(RemoteModelDescriptor.self,
+            from: Data(contentsOf: existing.appendingPathComponent("ready.json")))
+        XCTAssertEqual(receipt.version, "v1", "Availability must not rewrite or move a valid installation")
+    }
+
+    func testChangedContentsInvalidateCacheEvenWithoutAVersionChange() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(); defer { session.invalidateAndCancel() }
+        ModelAssetURLProtocol.body = payload
+        let store = RemoteModelStore(directory: root, session: session, compiler: { try Self.fakeCompile($0) })
+        let first = try await store.prepare(descriptor(), baseURL: baseURL)
+        let updated = Data("updated-manifest".utf8)
+        let changed = descriptor(contents: updated)
+        let cached = try await store.cachedModelURL(for: changed)
+        XCTAssertNil(cached)
+        ModelAssetURLProtocol.body = updated
+        _ = try await store.prepare(changed, baseURL: baseURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
         XCTAssertEqual(ModelAssetURLProtocol.requestCount, 2)
+    }
+
+    func testRemovalDuringCompilationWaitsAndPreventsModelReappearing() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(); defer { session.invalidateAndCancel() }
+        ModelAssetURLProtocol.body = payload
+        let compiling = expectation(description: "compiler started")
+        let cancelled = expectation(description: "compiler cancelled")
+        let gate = CompilationGate()
+        let store = RemoteModelStore(directory: root, session: session) { package in
+            compiling.fulfill()
+            await withTaskCancellationHandler { await gate.wait() } onCancel: { cancelled.fulfill() }
+            return try Self.fakeCompile(package)
+        }
+        let model = descriptor(), base = baseURL
+        let installation = Task { try await store.prepare(model, baseURL: base) }
+        await fulfillment(of: [compiling], timeout: 3)
+        let removal = Task { try await store.removeAll() }
+        await fulfillment(of: [cancelled], timeout: 3)
+        do {
+            _ = try await store.prepare(model, baseURL: base)
+            XCTFail("Cannot install while clearing")
+        } catch is CancellationError {}
+        await gate.release()
+        try await removal.value
+        do { _ = try await installation.value; XCTFail("Expected cancellation") } catch is CancellationError {}
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }
 
     func testAvailabilityChecksNeverDownloadAndDetectDeletedModels() async throws {
@@ -241,10 +369,12 @@ final class RemoteModelStoreTests: XCTestCase {
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
     }
 
-    private func descriptor(path: String = "Manifest.json", version: String = "v1") -> RemoteModelDescriptor {
-        RemoteModelDescriptor(id: "fixture", version: version, packageName: "Fixture.mlpackage", files: [
-            .init(path: path, asset: "manifest.json", bytes: Int64(payload.count),
-                  sha256: SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined())
+    private func descriptor(path: String = "Manifest.json", version: String = "v1", id: String = "fixture",
+                            contents: Data? = nil) -> RemoteModelDescriptor {
+        let data = contents ?? payload
+        return RemoteModelDescriptor(id: id, version: version, packageName: "Fixture.mlpackage", files: [
+            .init(path: path, asset: "manifest.json", bytes: Int64(data.count),
+                  sha256: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined())
         ])
     }
 
@@ -268,6 +398,20 @@ final class RemoteModelStoreTests: XCTestCase {
     }
 
     private enum TestFailure: Error { case compile }
+}
+
+private actor CompilationGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+    func wait() async {
+        if released { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
+    }
 }
 
 private final class ModelEventCollector: @unchecked Sendable {
